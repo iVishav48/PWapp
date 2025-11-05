@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ShoppingCart, Home, Package, Menu, X, Wifi, WifiOff } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import InstallPrompt from './InstallPrompt';
 import { useApp } from '../context/AppContext';
 
 const Navbar = () => {
@@ -54,6 +55,8 @@ const Navbar = () => {
               </span>
             </div>
             
+            <InstallPrompt />
+
             <Link
               to="/cart"
               className="relative p-2 hover:bg-gray-100 rounded-full transition-colors"

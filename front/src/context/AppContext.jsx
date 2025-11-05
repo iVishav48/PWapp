@@ -22,15 +22,19 @@ export const AppProvider = ({ children }) => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Simulate connectivity changes for demo
-    const interval = setInterval(() => {
-      setIsOnline(Math.random() > 0.1);
-    }, 5000);
+    // Auto-refresh on reconnect to fetch fresh content
+    const refreshOnReconnect = () => {
+      if (document.visibilityState === 'visible') {
+        // Soft reload to rehydrate data/routes
+        window.location.reload();
+      }
+    };
+    window.addEventListener('online', refreshOnReconnect);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      clearInterval(interval);
+      window.removeEventListener('online', refreshOnReconnect);
     };
   }, []);
 
