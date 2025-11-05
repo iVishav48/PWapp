@@ -49,6 +49,9 @@ const ProductPage = () => {
               <img
                 src={product.image}
                 alt={product.name}
+                loading="lazy"
+                decoding="async"
+                sizes="(max-width: 768px) 100vw, 50vw"
                 className="w-full h-full object-cover"
               />
             </div>
