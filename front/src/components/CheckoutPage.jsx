@@ -3,19 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import Navbar from './Navbar';
 import { useCart } from '../context/CartContext';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { orderService } from '../services/api';
 import { Wifi, WifiOff, Loader2 } from 'lucide-react';
 
 const CheckoutPage = () => {
   const navigate = useNavigate();
   const { cart, getSubtotal, getTotalDiscount, getTotal, clearCart } = useCart();
   const { isOnline } = useApp();
+  const { user, isAuthenticated } = useAuth();
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    address: '',
-    city: '',
-    zipCode: ''
+    name: user?.name || '',
+    email: user?.email || '',
+    phone: user?.phone || '',
+    address: user?.address || '',
+    city: user?.city || '',
+    state: user?.state || '',
+    zipCode: user?.zipCode || ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, synced, error
@@ -40,17 +44,54 @@ const CheckoutPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Check if user is authenticated
+    if (!isAuthenticated) {
+      alert('Please login to place an order');
+      navigate('/login');
+      return;
+    }
+    
+    if (!isOnline) {
+      alert('You are currently offline. Your order will be synced when you come back online.');
+    }
+    
     setIsSubmitting(true);
     setSyncStatus('syncing');
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      // Prepare order data
+      const orderData = {
+        items: cart.map(item => ({
+          productId: item.id,
+          quantity: item.quantity
+        })),
+        shippingAddress: {
+          fullName: formData.name,
+          address: formData.address,
+          city: formData.city,
+          state: formData.state,
+          zipCode: formData.zipCode
+        },
+        paymentMethod: 'credit_card', // Default payment method
+        discount: getTotalDiscount(),
+        notes: ''
+      };
 
-    setSyncStatus('synced');
-    setIsSubmitting(false);
-    clearCart();
-    alert('Order placed successfully!');
-    navigate('/');
+      // Create order via API
+      const response = await orderService.createOrder(orderData);
+      
+      setSyncStatus('synced');
+      clearCart();
+      alert('Order placed successfully!');
+      navigate('/');
+    } catch (error) {
+      console.error('Error placing order:', error);
+      setSyncStatus('error');
+      alert('Failed to place order. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (cart.length === 0) {
@@ -108,14 +149,26 @@ const CheckoutPage = () => {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-light text-gray-700 mb-2">ZIP Code</label>
+                    <label className="block text-sm font-light text-gray-700 mb-2">City</label>
                     <input
                       type="text"
                       required
-                      value={formData.zipCode}
-                      onChange={(e) => setFormData({...formData, zipCode: e.target.value})}
+                      value={formData.city}
+                      onChange={(e) => setFormData({...formData, city: e.target.value})}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent font-light"
-                      placeholder="10001"
+                      placeholder="New York"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-light text-gray-700 mb-2">State</label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.state}
+                      onChange={(e) => setFormData({...formData, state: e.target.value})}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent font-light"
+                      placeholder="NY"
                     />
                   </div>
                   

@@ -1,19 +1,94 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, AlertCircle, RefreshCw } from 'lucide-react';
 import Navbar from './Navbar';
 import { useCart } from '../context/CartContext';
+import { productService } from '../services/api';
+import Loading from './Loading';
 
 const CartPage = () => {
   const navigate = useNavigate();
   const { cart, updateCartQuantity, getSubtotal, getTotalDiscount, getTotal } = useCart();
+  const [stockWarnings, setStockWarnings] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Validate stock for cart items
+  const validateStock = async () => {
+    if (cart.length === 0) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const productIds = cart.map(item => item.id);
+      const stockData = await productService.validateStock(productIds);
+      
+      const warnings = {};
+      cart.forEach(item => {
+        const stockInfo = stockData.find(stock => stock.productId === item.id);
+        if (stockInfo && item.quantity > stockInfo.stock) {
+          warnings[item.id] = `Only ${stockInfo.stock} items available in stock`;
+          // Auto-adjust quantity to available stock
+          if (stockInfo.stock > 0) {
+            updateCartQuantity(item.id, stockInfo.stock);
+          }
+        }
+      });
+      
+      setStockWarnings(warnings);
+    } catch (error) {
+      console.error('Stock validation failed:', error);
+      setError(error.message || 'Failed to validate stock. Please check your connection.');
+      
+      // Fallback to local stock data if API fails
+      const warnings = {};
+      cart.forEach(item => {
+        if (item.quantity > item.stock) {
+          warnings[item.id] = `Stock validation failed. Showing local data.`;
+        }
+      });
+      setStockWarnings(warnings);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    validateStock();
+  }, [cart]);
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       
       <div className="max-w-7xl mx-auto px-4 py-12">
-        <h1 className="text-4xl font-display font-light text-gray-900 mb-8 tracking-wide">Shopping Cart</h1>
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-4xl font-display font-light text-gray-900 tracking-wide flex items-center">
+            <ShoppingCart className="mr-3" />
+            Shopping Cart
+            {loading && <Loading size="sm" message="Checking stock..." className="ml-2" />}
+          </h1>
+          {cart.length > 0 && (
+            <button
+              onClick={validateStock}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Validating...' : 'Check Stock'}
+            </button>
+          )}
+        </div>
+        
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-center text-red-700">
+              <AlertCircle className="w-5 h-5 mr-2" />
+              {error}
+            </div>
+          </div>
+        )}
 
         {cart.length === 0 ? (
           <div className="bg-white rounded-lg shadow-sm p-12 text-center border border-gray-200">
@@ -50,6 +125,12 @@ const CartPage = () => {
                       <div className="flex-1">
                         <h3 className="text-lg font-light text-gray-900 mb-1">{item.name}</h3>
                         <p className="text-sm font-light text-gray-500 mb-3">{item.category}</p>
+                        {stockWarnings[item.id] && (
+                          <div className="flex items-center mb-2 text-sm text-red-600">
+                            <AlertCircle className="w-4 h-4 mr-1" />
+                            {stockWarnings[item.id]}
+                          </div>
+                        )}
                         <div className="flex items-center gap-3">
                           <span className="text-xl font-light text-gray-900">${discountedPrice.toFixed(2)}</span>
                           {item.discount > 0 && (

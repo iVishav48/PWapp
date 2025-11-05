@@ -1,0 +1,19 @@
+import React from 'react';
+import { Loader2 } from 'lucide-react';
+
+const Loading = ({ size = 'md', message = 'Loading...', className = '' }) => {
+  const sizeClasses = {
+    sm: 'w-4 h-4',
+    md: 'w-8 h-8',
+    lg: 'w-12 h-12',
+  };
+
+  return (
+    <div className={`flex items-center justify-center ${className}`}>
+      <Loader2 className={`${sizeClasses[size]} animate-spin text-blue-600`} />
+      {message && <span className="ml-2 text-gray-600">{message}</span>}
+    </div>
+  );
+};
+
+export default Loading;

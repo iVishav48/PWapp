@@ -15,15 +15,33 @@ export const CartProvider = ({ children }) => {
 
   const addToCart = (product, quantity = 1) => {
     setCart(prevCart => {
-      const existingItem = prevCart.find(item => item.id === product.id);
+      const normalizedId = product._id || product.id;
+      const effectivePrice = typeof product.discountPrice === 'number' && product.discountPrice > 0
+        ? product.discountPrice
+        : product.price;
+      const discountPercent = (typeof product.discountPrice === 'number' && product.discountPrice > 0 && product.price > 0)
+        ? Math.round(((product.price - product.discountPrice) / product.price) * 100)
+        : (typeof product.discount === 'number' ? product.discount : 0);
+
+      const normalized = {
+        ...product,
+        _id: normalizedId,
+        id: normalizedId,
+        price: effectivePrice,
+        discount: discountPercent,
+        stock: product.stock ?? 9999,
+        image: product.images?.[0]?.url || product.image,
+      };
+
+      const existingItem = prevCart.find(item => (item._id || item.id) === normalizedId);
       if (existingItem) {
         return prevCart.map(item =>
-          item.id === product.id
-            ? { ...item, quantity: Math.min(item.quantity + quantity, product.stock) }
+          (item._id || item.id) === normalizedId
+            ? { ...item, quantity: Math.min(item.quantity + quantity, normalized.stock) }
             : item
         );
       }
-      return [...prevCart, { ...product, quantity }];
+      return [...prevCart, { ...normalized, quantity }];
     });
   };
 

@@ -56,7 +56,8 @@ registerRoute(
   new NetworkFirst({ cacheName: 'route-product-details', networkTimeoutSeconds: 5 })
 );
 
-// API examples (if you later add APIs):
+// API caching strategies
+
 // Product list JSON: stale-while-revalidate
 registerRoute(
   ({ url }) => url.pathname.startsWith('/api/products'),
@@ -69,7 +70,38 @@ registerRoute(
   new NetworkFirst({ cacheName: 'api-product-details', networkTimeoutSeconds: 5 })
 );
 
-// Background sync for queued actions (e.g., checkout POSTs)
+// Stock validation: network-first with short timeout
+registerRoute(
+  ({ url, request }) => request.method === 'POST' && url.pathname.startsWith('/api/products/validate-stock'),
+  new NetworkFirst({ cacheName: 'api-stock-validation', networkTimeoutSeconds: 3 })
+);
+
+// Orders API: network-first with background sync
+const orderQueue = new BackgroundSyncPlugin('order-queue', {
+  maxRetentionTime: 24 * 60, // retry for up to 24 hours
+});
+registerRoute(
+  ({ url, request }) => request.method === 'POST' && url.pathname.startsWith('/api/orders'),
+  new NetworkFirst({
+    cacheName: 'api-orders',
+    plugins: [orderQueue],
+  }),
+  'POST'
+);
+
+// User orders: network-first with cache fallback
+registerRoute(
+  ({ url, request }) => request.method === 'GET' && url.pathname.startsWith('/api/orders'),
+  new NetworkFirst({ cacheName: 'api-user-orders', networkTimeoutSeconds: 5 })
+);
+
+// Authentication API: network-only (no caching for security)
+registerRoute(
+  ({ url }) => url.pathname.startsWith('/api/auth'),
+  new NetworkFirst({ cacheName: 'api-auth', networkTimeoutSeconds: 5 })
+);
+
+// Background sync for checkout (legacy support)
 const checkoutQueue = new BackgroundSyncPlugin('checkout-queue', {
   maxRetentionTime: 24 * 60, // retry for up to 24 hours
 });
