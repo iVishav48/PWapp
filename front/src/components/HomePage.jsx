@@ -4,6 +4,7 @@ import { Search, Loader2 } from 'lucide-react';
 import Navbar from './Navbar';
 import ConnectivityBanner from './ConnectivityBanner';
 import { productService } from '../services/api';
+import DockBar from './DockBar';
 import { useApp } from '../context/AppContext';
 import { useCart } from '../context/CartContext';
 import { useIntersectionObserver } from '../hooks/useScrollAnimation';
@@ -20,29 +21,94 @@ const HomePage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const pageSize = 6;
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Build a lightweight cache key for product lists
+  const cacheKey = useMemo(() => {
+    const cat = selectedCategory || 'All';
+    const q = (debouncedSearch || '').trim();
+    return `home.products:${cat}:${q}`;
+  }, [selectedCategory, debouncedSearch]);
   
   // Scroll animations
   const [heroRef, heroVisible] = useIntersectionObserver({ threshold: 0.1 });
   const [productsRef, productsVisible] = useIntersectionObserver({ threshold: 0.1 });
 
+  // Debounce search to avoid refetching on every keystroke
   useEffect(() => {
-    const fetchData = async () => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery || ''), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // Fetch categories once on mount
+  useEffect(() => {
+    let isCancelled = false;
+    const fetchCategories = async () => {
+      try {
+        const categoriesResponse = await productService.getCategories();
+        if (isCancelled) return;
+        const rawCategories = categoriesResponse.data?.categories || [];
+        const categoryNames = ['All', ...rawCategories.map(c => c.name).filter(Boolean)];
+        setCategories(categoryNames);
+      } catch (err) {
+        if (isCancelled) return;
+        // Fallback categories
+        try {
+          const { CATEGORIES } = await import('../data/products');
+          setCategories(CATEGORIES);
+        } catch (_) {
+          setCategories(['All']);
+        }
+      }
+    };
+    fetchCategories();
+    return () => { isCancelled = true; };
+  }, []);
+
+  // Fetch products when filters change
+  useEffect(() => {
+    let isCancelled = false;
+    // Abort controller to cancel in-flight requests if filters change quickly
+    const controller = new AbortController();
+
+    // Try to show cached results immediately (perceived performance)
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setProducts(parsed);
+          setLoading(false);
+        }
+      }
+    } catch (_) {}
+
+    const fetchProducts = async () => {
       try {
         setLoading(true);
         setError(null);
-        
-        // Fetch products
         const productsResponse = await productService.getProducts({
           page: 1,
-          limit: 100, // Get all products for now, we'll do client-side pagination
+          // Fetch fewer items initially to reduce payload; client paginates
+          limit: 18,
           category: selectedCategory !== 'All' ? selectedCategory : undefined,
-          search: searchQuery || undefined,
+          search: debouncedSearch || undefined,
+          // Pass abort signal when supported by axios
+          signal: controller.signal,
         });
-        
-        // Fetch categories
-        const categoriesResponse = await productService.getCategories();
-        
-        const rawProducts = productsResponse.data?.products || productsResponse.data || [];
+        if (isCancelled) return;
+        let rawProducts = productsResponse.data?.products || productsResponse.data || [];
+
+        // If backend returns no products, fallback to local sample data for a better UX
+        if (!Array.isArray(rawProducts) || rawProducts.length === 0) {
+          try {
+            const { PRODUCTS } = await import('../data/products');
+            rawProducts = PRODUCTS;
+          } catch (_) {
+            rawProducts = [];
+          }
+        }
+
         const normalizedProducts = rawProducts.map(p => {
           const id = p._id || p.id;
           const categoryName = (p.category && (p.category.name || p.category)) || 'Uncategorized';
@@ -61,28 +127,32 @@ const HomePage = () => {
             discount,
           };
         });
-
-        const rawCategories = categoriesResponse.data?.categories || [];
-        const categoryNames = ['All', ...rawCategories.map(c => c.name).filter(Boolean)];
-        
         setProducts(normalizedProducts);
-        setCategories(categoryNames);
+        // Persist in sessionStorage for instant rendering on next visit
+        try {
+          sessionStorage.setItem(cacheKey, JSON.stringify(normalizedProducts));
+        } catch (_) {}
+        // Reset to first page when filter/search changes
+        setPage(1);
       } catch (err) {
-        console.error('Error fetching data:', err);
+        if (controller.signal.aborted) return;
+        console.error('Error fetching products:', err);
         setError('Failed to load products. Please try again.');
-        
         // Fallback to mock data if API fails
         const { PRODUCTS } = await import('../data/products');
-        const categoriesData = ['All', 'Electronics', 'Clothing', 'Home & Garden', 'Sports', 'Books'];
+        if (isCancelled) return;
         setProducts(PRODUCTS);
-        setCategories(categoriesData);
       } finally {
-        setLoading(false);
+        if (!isCancelled) setLoading(false);
       }
     };
 
-    fetchData();
-  }, [selectedCategory, searchQuery]);
+    fetchProducts();
+    return () => {
+      isCancelled = true;
+      controller.abort();
+    };
+  }, [selectedCategory, debouncedSearch, cacheKey]);
 
   const filteredProducts = useMemo(() => {
     const q = (searchQuery || '').toLowerCase();
@@ -117,11 +187,12 @@ const HomePage = () => {
   }, [sortedProducts, currentPage]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-transparent">
+      <DockBar />
       <Navbar />
       <ConnectivityBanner />
       
-      <div ref={heroRef} className={`bg-white border-b border-gray-100 transition-all duration-1000 ${heroVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+      <div ref={heroRef} className={`bg-white border-b border-gray-100 transition-all duration-1000 pt-32 ${heroVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
         <div className="max-w-7xl mx-auto px-4 py-12">
           <div className="max-w-5xl mx-auto">
             <div className="flex flex-col lg:flex-row gap-4 lg:items-center">

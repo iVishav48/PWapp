@@ -4,6 +4,7 @@ import { CartProvider } from './context/CartContext';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider } from './context/AuthContext';
 import HomePage from './components/HomePage';
+import NotFound from './components/NotFound';
 import ProductPage from './components/ProductPage';
 import CartPage from './components/CartPage';
 import CheckoutPage from './components/CheckoutPage';
@@ -21,6 +22,13 @@ function App() {
               <Route path="/cart" element={<CartPage />} />
               <Route path="/checkout" element={<CheckoutPage />} />
               <Route path="/login" element={<Login />} />
+              {/* Temporary pages route to 404 */}
+              <Route path="/about" element={<NotFound />} />
+              <Route path="/contact" element={<NotFound />} />
+              <Route path="/faqs" element={<NotFound />} />
+              <Route path="/terms" element={<NotFound />} />
+              {/* Catch-all */}
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </Router>
         </CartProvider>
