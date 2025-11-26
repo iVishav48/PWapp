@@ -1,66 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Navbar from './Navbar';
+import { PRODUCTS } from '../data/products';
 import { useCart } from '../context/CartContext';
-import { productService } from '../services/api';
-import { Loader2 } from 'lucide-react';
 
 const ProductPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { addToCart } = useCart();
-  
-  const [product, setProduct] = useState(null);
   const [quantity, setQuantity] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   
-  useEffect(() => {
-    const fetchProduct = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await productService.getProduct(id);
-        // Handle both direct data and response.data formats
-        const productData = response.data || response;
-        setProduct(productData);
-      } catch (err) {
-        console.error('Error fetching product:', err);
-        setError('Failed to load product details. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    if (id) {
-      fetchProduct();
-    }
-  }, [id]);
+  const product = PRODUCTS.find(p => p.id === parseInt(id));
   
-  if (loading) {
+  if (!product) {
     return (
       <div className="min-h-screen bg-gray-50">
         <Navbar />
         <div className="max-w-7xl mx-auto px-4 py-12 text-center">
-          <Loader2 className="animate-spin text-gray-400 mx-auto" size={48} />
-          <p className="text-lg font-light text-gray-600 mt-4">Loading product details...</p>
-        </div>
-      </div>
-    );
-  }
-  
-  if (error || !product) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Navbar />
-        <div className="max-w-7xl mx-auto px-4 py-12 text-center">
-          <h1 className="text-2xl font-light text-gray-900 mb-4">
-            {error ? 'Error loading product' : 'Product not found'}
-          </h1>
-          <p className="text-gray-600 mb-6">{error || 'The product you are looking for does not exist.'}</p>
+          <p className="text-lg font-light text-gray-500">Product not found.</p>
           <button
             onClick={() => navigate('/')}
-            className="px-6 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
+            className="mt-4 px-6 py-3 bg-gray-900 text-white font-light rounded-lg hover:bg-gray-800 transition-colors"
           >
             Back to Home
           </button>
@@ -69,12 +29,7 @@ const ProductPage = () => {
     );
   }
 
-  const effectivePrice = typeof product.discountPrice === 'number' && product.discountPrice > 0
-    ? product.discountPrice
-    : product.price;
-  const discountPercent = (typeof product.discountPrice === 'number' && product.discountPrice > 0 && product.price > 0)
-    ? Math.round(((product.price - product.discountPrice) / product.price) * 100)
-    : (typeof product.discount === 'number' ? product.discount : 0);
+  const discountedPrice = product.price - (product.price * product.discount / 100);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -92,7 +47,7 @@ const ProductPage = () => {
           <div className="grid md:grid-cols-2 gap-8 p-8">
             <div className="aspect-square overflow-hidden rounded-lg bg-gray-100">
               <img
-                src={product.images?.[0]?.url || product.image}
+                src={product.image}
                 alt={product.name}
                 loading="lazy"
                 decoding="async"
@@ -102,17 +57,17 @@ const ProductPage = () => {
             </div>
 
             <div className="flex flex-col">
-              <p className="text-xs font-light text-gray-500 uppercase tracking-wider mb-2">{product.category?.name || product.category}</p>
+              <p className="text-xs font-light text-gray-500 uppercase tracking-wider mb-2">{product.category}</p>
               <h1 className="text-4xl font-display font-light text-gray-900 mb-3 tracking-wide">{product.name}</h1>
-              <p className="text-lg font-light text-gray-600 mb-6">{product.shortDescription || product.shortDesc}</p>
+              <p className="text-lg font-light text-gray-600 mb-6">{product.shortDesc}</p>
 
               <div className="flex items-baseline gap-3 mb-6">
-                <span className="text-4xl font-light text-gray-900">${effectivePrice?.toFixed ? effectivePrice.toFixed(2) : Number(effectivePrice).toFixed(2)}</span>
-                {discountPercent > 0 && (
+                <span className="text-4xl font-light text-gray-900">${discountedPrice.toFixed(2)}</span>
+                {product.discount > 0 && (
                   <>
-                    <span className="text-xl font-light text-gray-400 line-through">${product.price?.toFixed ? product.price.toFixed(2) : Number(product.price).toFixed(2)}</span>
+                    <span className="text-xl font-light text-gray-400 line-through">${product.price.toFixed(2)}</span>
                     <span className="px-3 py-1 bg-green-100 text-green-800 text-sm font-light rounded-full">
-                      Save {discountPercent}%
+                      Save {product.discount}%
                     </span>
                   </>
                 )}
@@ -174,4 +129,3 @@ const ProductPage = () => {
 };
 
 export default ProductPage;
-

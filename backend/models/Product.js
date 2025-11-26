@@ -114,10 +114,9 @@ const productSchema = new mongoose.Schema({
 // Indexes for better query performance
 productSchema.index({ name: 'text', description: 'text', tags: 'text' });
 productSchema.index({ category: 1, isActive: 1 });
-productSchema.index({ slug: 1 });
+// Note: slug and sku already have indexes from unique: true
 productSchema.index({ price: 1 });
 productSchema.index({ isFeatured: 1, isActive: 1 });
-productSchema.index({ sku: 1 });
 productSchema.index({ lastSyncAt: 1 });
 
 // Virtual for discount percentage

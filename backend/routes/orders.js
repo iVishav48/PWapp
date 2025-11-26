@@ -115,6 +115,7 @@ router.post('/',
       // Validate products and calculate totals
       const orderItems = [];
       let subtotal = 0;
+      const stockUpdates = []; // Track stock updates for atomic operations
       
       for (const item of items) {
         const product = await Product.findById(item.productId);
@@ -142,6 +143,13 @@ router.post('/',
           name: product.name,
           image: product.images.length > 0 ? product.images[0].url : null,
         });
+
+        // Prepare stock update for atomic operation
+        stockUpdates.push({
+          productId: item.productId,
+          quantity: item.quantity,
+          productName: product.name,
+        });
       }
 
       // Calculate totals
@@ -153,40 +161,73 @@ router.post('/',
         return res.status(400).json({ message: 'Invalid discount amount' });
       }
 
-      // Create order
-      const order = new Order({
-        userId,
-        items: orderItems,
-        shippingAddress,
-        paymentMethod,
-        subtotal,
-        tax,
-        shippingCost,
-        discount,
-        total,
-        notes,
-        orderStatus: 'pending',
-        paymentStatus: 'pending',
-      });
+      // CRITICAL FIX: Update stock atomically BEFORE saving order
+      // This ensures stock is decremented when order is created
+      // Using atomic $inc with condition to prevent negative stock
+      const stockUpdateResults = [];
+      for (const stockUpdate of stockUpdates) {
+        const updateResult = await Product.findByIdAndUpdate(
+          stockUpdate.productId,
+          { 
+            $inc: { stock: -stockUpdate.quantity },
+            $min: { stock: 0 } // Ensure stock doesn't go negative
+          },
+          { new: true } // Return updated document
+        );
 
-      // Calculate expected delivery date
-      order.calculateTotals();
-
-      // Check if this is an offline order
-      if (req.body.offlineOrderId) {
-        order.offlineOrderId = req.body.offlineOrderId;
-        order.isSynced = false;
-        order.syncStatus = 'pending';
+        // Double-check stock didn't go negative (race condition protection)
+        if (updateResult && updateResult.stock < 0) {
+          // Rollback: restore stock for all previously updated products
+          for (const prevUpdate of stockUpdateResults) {
+            await Product.findByIdAndUpdate(
+              prevUpdate.productId,
+              { $inc: { stock: prevUpdate.quantity } }
+            );
+          }
+          return res.status(400).json({ 
+            message: `Insufficient stock for ${stockUpdate.productName}. Please try again.` 
+          });
+        }
+        stockUpdateResults.push(stockUpdate);
       }
 
-      await order.save();
+      try {
+        // Create order AFTER stock is successfully decremented
+        const order = new Order({
+          userId,
+          items: orderItems,
+          shippingAddress,
+          paymentMethod,
+          subtotal,
+          tax,
+          shippingCost,
+          discount,
+          total,
+          notes,
+          orderStatus: 'pending',
+          paymentStatus: 'pending',
+        });
 
-      // Update product stock
-      for (const item of orderItems) {
-        await Product.findByIdAndUpdate(
-          item.product,
-          { $inc: { stock: -item.quantity } }
-        );
+        // Calculate expected delivery date
+        order.calculateTotals();
+
+        // Check if this is an offline order
+        if (req.body.offlineOrderId) {
+          order.offlineOrderId = req.body.offlineOrderId;
+          order.isSynced = false;
+          order.syncStatus = 'pending';
+        }
+
+        await order.save();
+      } catch (orderError) {
+        // Rollback stock if order save fails
+        for (const stockUpdate of stockUpdateResults) {
+          await Product.findByIdAndUpdate(
+            stockUpdate.productId,
+            { $inc: { stock: stockUpdate.quantity } }
+          );
+        }
+        throw orderError; // Re-throw to be caught by outer catch
       }
 
       // Clear user's cart
@@ -327,6 +368,7 @@ router.post('/sync', auth, async (req, res) => {
         // Validate and create order
         const orderItems = [];
         let subtotal = 0;
+        const stockUpdates = [];
         
         for (const item of offlineOrder.items) {
           const product = await Product.findById(item.productId);
@@ -348,39 +390,73 @@ router.post('/sync', auth, async (req, res) => {
             name: product.name,
             image: product.images.length > 0 ? product.images[0].url : null,
           });
+
+          stockUpdates.push({
+            productId: item.productId,
+            quantity: item.quantity,
+            productName: product.name,
+          });
         }
 
         const tax = subtotal * 0.08;
         const shippingCost = subtotal > 50 ? 0 : 9.99;
         const total = subtotal + tax + shippingCost - (offlineOrder.discount || 0);
 
-        const order = new Order({
-          userId,
-          items: orderItems,
-          shippingAddress: offlineOrder.shippingAddress,
-          paymentMethod: offlineOrder.paymentMethod,
-          subtotal,
-          tax,
-          shippingCost,
-          discount: offlineOrder.discount || 0,
-          total,
-          offlineOrderId: offlineOrder.offlineOrderId,
-          isSynced: true,
-          syncStatus: 'synced',
-          orderStatus: 'pending',
-          paymentStatus: 'pending',
-          createdAt: offlineOrder.createdAt || new Date(),
-        });
-
-        order.calculateTotals();
-        await order.save();
-
-        // Update product stock
-        for (const item of orderItems) {
-          await Product.findByIdAndUpdate(
-            item.product,
-            { $inc: { stock: -item.quantity } }
+        // CRITICAL FIX: Update stock atomically BEFORE saving order
+        const stockUpdateResults = [];
+        for (const stockUpdate of stockUpdates) {
+          const updateResult = await Product.findByIdAndUpdate(
+            stockUpdate.productId,
+            { 
+              $inc: { stock: -stockUpdate.quantity },
+              $min: { stock: 0 }
+            },
+            { new: true }
           );
+
+          if (updateResult && updateResult.stock < 0) {
+            // Rollback all previous stock updates
+            for (const prevUpdate of stockUpdateResults) {
+              await Product.findByIdAndUpdate(
+                prevUpdate.productId,
+                { $inc: { stock: prevUpdate.quantity } }
+              );
+            }
+            throw new Error(`Insufficient stock for ${stockUpdate.productName}`);
+          }
+          stockUpdateResults.push(stockUpdate);
+        }
+
+        try {
+          const order = new Order({
+            userId,
+            items: orderItems,
+            shippingAddress: offlineOrder.shippingAddress,
+            paymentMethod: offlineOrder.paymentMethod,
+            subtotal,
+            tax,
+            shippingCost,
+            discount: offlineOrder.discount || 0,
+            total,
+            offlineOrderId: offlineOrder.offlineOrderId,
+            isSynced: true,
+            syncStatus: 'synced',
+            orderStatus: 'pending',
+            paymentStatus: 'pending',
+            createdAt: offlineOrder.createdAt || new Date(),
+          });
+
+          order.calculateTotals();
+          await order.save();
+        } catch (orderError) {
+          // Rollback stock if order save fails
+          for (const stockUpdate of stockUpdateResults) {
+            await Product.findByIdAndUpdate(
+              stockUpdate.productId,
+              { $inc: { stock: stockUpdate.quantity } }
+            );
+          }
+          throw orderError;
         }
 
         syncedOrders.push(order);

@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authService } from '../services/api';
 
 const AuthContext = createContext();
 
@@ -11,126 +10,114 @@ export const useAuth = () => {
   return context;
 };
 
+// Use relative URL for proxy in dev, or absolute URL in production
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem('token'));
 
-  // Check if user is logged in on app load
+  // Check if user is authenticated on mount
   useEffect(() => {
-    const initializeAuth = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        if (token) {
-          // Verify token and get user data
-          const userData = await authService.getCurrentUser();
-          setUser(userData);
+    const checkAuth = async () => {
+      if (token) {
+        try {
+          const response = await fetch(`${API_BASE_URL}/auth/me`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            setUser(data.user);
+          } else {
+            // Token is invalid, clear it
+            localStorage.removeItem('token');
+            setToken(null);
+          }
+        } catch (error) {
+          console.error('Auth check error:', error);
+          localStorage.removeItem('token');
+          setToken(null);
         }
-      } catch (error) {
-        console.error('Error initializing auth:', error);
-        localStorage.removeItem('token');
-      } finally {
-        setLoading(false);
       }
+      setLoading(false);
     };
 
-    initializeAuth();
-    
-    // Listen for token expiration events
-    const handleTokenExpired = () => {
-      setUser(null);
-      setError(null);
-      alert('Your session has expired. Please login again.');
-    };
-    
-    window.addEventListener('auth:token-expired', handleTokenExpired);
-    
-    return () => {
-      window.removeEventListener('auth:token-expired', handleTokenExpired);
-    };
-  }, []);
+    checkAuth();
+  }, [token]);
 
   const login = async (email, password) => {
     try {
-      setError(null);
-      setLoading(true);
-      
-      const response = await authService.login(email, password);
-      const { token, user: userData } = response;
-      
-      localStorage.setItem('token', token);
-      setUser(userData);
-      
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed');
+      }
+
+      setToken(data.token);
+      setUser(data.user);
+      localStorage.setItem('token', data.token);
       return { success: true };
     } catch (error) {
-      const msg = error?.response?.data?.message
-        || (Array.isArray(error?.response?.data?.errors) ? error.response.data.errors.map(e => e.msg).join(', ') : null)
-        || error.message
-        || 'Login failed';
-      setError(msg);
-      return { success: false, error: msg };
-    } finally {
-      setLoading(false);
+      return { success: false, error: error.message };
     }
   };
 
-  const register = async (userData) => {
+  const register = async (name, email, password) => {
     try {
-      setError(null);
-      setLoading(true);
-      
-      const response = await authService.register(userData);
-      const { token, user: newUser } = response;
-      
-      localStorage.setItem('token', token);
-      setUser(newUser);
-      
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Registration failed');
+      }
+
+      setToken(data.token);
+      setUser(data.user);
+      localStorage.setItem('token', data.token);
       return { success: true };
     } catch (error) {
-      const msg = error?.response?.data?.message
-        || (Array.isArray(error?.response?.data?.errors) ? error.response.data.errors.map(e => e.msg).join(', ') : null)
-        || error.message
-        || 'Registration failed';
-      setError(msg);
-      return { success: false, error: msg };
-    } finally {
-      setLoading(false);
+      return { success: false, error: error.message };
     }
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
+    setToken(null);
     setUser(null);
-    setError(null);
-  };
-
-  const updateProfile = async (userData) => {
-    try {
-      setError(null);
-      setLoading(true);
-      
-      const updatedUser = await authService.updateProfile(userData);
-      setUser(updatedUser);
-      
-      return { success: true };
-    } catch (error) {
-      setError(error.message || 'Profile update failed');
-      return { success: false, error: error.message };
-    } finally {
-      setLoading(false);
-    }
+    localStorage.removeItem('token');
   };
 
   const value = {
     user,
+    token,
     loading,
-    error,
     login,
     register,
     logout,
-    updateProfile,
     isAuthenticated: !!user,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 };

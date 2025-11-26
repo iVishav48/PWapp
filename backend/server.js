@@ -9,7 +9,7 @@ const mongoSanitize = require('express-mongo-sanitize');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
-require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+require('dotenv').config();
 
 const app = express();
 
@@ -65,9 +65,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI , {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
+mongoose.connect(process.env.MONGODB_URI, {
   dbName: process.env.MONGODB_DB || 'pwa-storefront',
 })
 .then(() => console.log('MongoDB connected successfully'))
@@ -75,6 +73,7 @@ mongoose.connect(process.env.MONGODB_URI , {
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/users', require('./routes/users')); // Added for server folder compatibility
 app.use('/api/products', require('./routes/products'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/cart', require('./routes/cart'));

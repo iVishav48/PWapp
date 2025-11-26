@@ -128,7 +128,7 @@ const orderSchema = new mongoose.Schema({
 
 // Indexes
 orderSchema.index({ userId: 1, createdAt: -1 });
-orderSchema.index({ orderNumber: 1 });
+// Note: orderNumber already has index from unique: true and index: true
 orderSchema.index({ orderStatus: 1 });
 orderSchema.index({ paymentStatus: 1 });
 orderSchema.index({ expectedDeliveryDate: 1 });

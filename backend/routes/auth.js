@@ -1,26 +1,8 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const router = express.Router();
-
-// Mock user data (in a real app, you'd have a User model)
-const users = [
-  {
-    id: '1',
-    email: 'demo@example.com',
-    password: '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/RK.PJ/..G', // password: demo123
-    name: 'Demo User',
-    isAdmin: false,
-  },
-  {
-    id: '2',
-    email: 'admin@example.com',
-    password: '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/RK.PJ/..G', // password: demo123
-    name: 'Admin User',
-    isAdmin: true,
-  },
-];
+const User = require('../models/User');
 
 // POST /api/auth/register - Register new user
 router.post('/register',
@@ -36,37 +18,41 @@ router.post('/register',
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const { email, password, name } = req.body;
+      const { email, password, name, username } = req.body;
 
-      // Check if user exists (in a real app, check database)
-      const existingUser = users.find(u => u.email === email);
+      // Check if user already exists
+      const existingUser = await User.findOne({ email: email.toLowerCase() });
       if (existingUser) {
         return res.status(400).json({ message: 'User already exists' });
       }
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, parseInt(process.env.BCRYPT_SALT_ROUNDS) || 12);
+      // Check if username is provided and already exists
+      if (username) {
+        const existingUsername = await User.findOne({ username });
+        if (existingUsername) {
+          return res.status(400).json({ message: 'Username already exists' });
+        }
+      }
 
-      // Create user (in a real app, save to database)
-      const newUser = {
-        id: Date.now().toString(),
-        email,
-        password: hashedPassword,
-        name,
+      // Create new user (password will be hashed by pre-save hook)
+      const newUser = new User({
+        email: email.toLowerCase(),
+        password,
+        name: name || username, // Use name or username as fallback
+        username: username || undefined, // Optional username from server folder
         isAdmin: false,
-        createdAt: new Date(),
-      };
-      
-      users.push(newUser);
+      });
+
+      await newUser.save();
 
       // Generate JWT token
       const token = jwt.sign(
         { 
-          userId: newUser.id, 
+          userId: newUser._id.toString(), 
           email: newUser.email,
           isAdmin: newUser.isAdmin,
         },
-        process.env.JWT_SECRET,
+        process.env.JWT_SECRET || 'your-secret-key-change-in-production',
         { expiresIn: process.env.JWT_EXPIRE || '7d' }
       );
 
@@ -74,9 +60,10 @@ router.post('/register',
         message: 'User registered successfully',
         token,
         user: {
-          id: newUser.id,
+          id: newUser._id.toString(),
           email: newUser.email,
           name: newUser.name,
+          username: newUser.username,
           isAdmin: newUser.isAdmin,
         },
       });
@@ -105,26 +92,29 @@ router.post('/login',
 
       const { email, password } = req.body;
 
-      // Find user (in a real app, query database)
-      const user = users.find(u => u.email === email);
+      // Find user in database and include password for comparison
+      const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
       if (!user) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
 
-      // Check password
-      const isMatch = await bcrypt.compare(password, user.password);
+      // Check password using model method
+      const isMatch = await user.comparePassword(password);
       if (!isMatch) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
 
+      // Update last login
+      await user.updateLastLogin();
+
       // Generate JWT token
       const token = jwt.sign(
         { 
-          userId: user.id, 
+          userId: user._id.toString(), 
           email: user.email,
           isAdmin: user.isAdmin,
         },
-        process.env.JWT_SECRET,
+        process.env.JWT_SECRET || 'your-secret-key-change-in-production',
         { expiresIn: process.env.JWT_EXPIRE || '7d' }
       );
 
@@ -132,9 +122,10 @@ router.post('/login',
         message: 'Login successful',
         token,
         user: {
-          id: user.id,
+          id: user._id.toString(),
           email: user.email,
           name: user.name,
+          username: user.username,
           isAdmin: user.isAdmin,
         },
       });
@@ -157,22 +148,23 @@ router.get('/me', async (req, res) => {
       return res.status(401).json({ message: 'No token provided' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
     
-    // Find user (in a real app, query database)
-    const user = users.find(u => u.id === decoded.userId);
+    // Find user in database
+    const user = await User.findById(decoded.userId);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        isAdmin: user.isAdmin,
-      },
-    });
+      res.json({
+        user: {
+          id: user._id.toString(),
+          email: user.email,
+          name: user.name,
+          username: user.username,
+          isAdmin: user.isAdmin,
+        },
+      });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(401).json({ message: 'Invalid token' });
@@ -190,7 +182,7 @@ router.post('/guest', async (req, res) => {
         userId: guestId, 
         isGuest: true,
       },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || 'your-secret-key-change-in-production',
       { expiresIn: '30d' }
     );
 
@@ -230,7 +222,7 @@ router.post('/convert-guest',
         return res.status(401).json({ message: 'No token provided' });
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
       if (!decoded.isGuest) {
         return res.status(400).json({ message: 'Not a guest account' });
       }
@@ -238,34 +230,29 @@ router.post('/convert-guest',
       const { email, password, name } = req.body;
 
       // Check if email already exists
-      const existingUser = users.find(u => u.email === email);
+      const existingUser = await User.findOne({ email: email.toLowerCase() });
       if (existingUser) {
         return res.status(400).json({ message: 'Email already registered' });
       }
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, parseInt(process.env.BCRYPT_SALT_ROUNDS) || 12);
-
-      // Create new user
-      const newUser = {
-        id: Date.now().toString(),
-        email,
-        password: hashedPassword,
+      // Create new user (password will be hashed by pre-save hook)
+      const newUser = new User({
+        email: email.toLowerCase(),
+        password,
         name,
         isAdmin: false,
-        createdAt: new Date(),
-      };
+      });
       
-      users.push(newUser);
+      await newUser.save();
 
       // Generate new token for registered user
       const newToken = jwt.sign(
         { 
-          userId: newUser.id, 
+          userId: newUser._id.toString(), 
           email: newUser.email,
           isAdmin: newUser.isAdmin,
         },
-        process.env.JWT_SECRET,
+        process.env.JWT_SECRET || 'your-secret-key-change-in-production',
         { expiresIn: process.env.JWT_EXPIRE || '7d' }
       );
 
@@ -273,9 +260,10 @@ router.post('/convert-guest',
         message: 'Guest account converted successfully',
         token: newToken,
         user: {
-          id: newUser.id,
+          id: newUser._id.toString(),
           email: newUser.email,
           name: newUser.name,
+          username: newUser.username,
           isAdmin: newUser.isAdmin,
         },
       });

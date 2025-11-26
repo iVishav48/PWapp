@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { idbGetAll, idbPut, idbDelete, idbClear } from '../utils/idb';
+import { enqueueAction, reconcileCartAgainstCatalog, replayQueueOnline } from '../utils/offlineQueue';
 
 const CartContext = createContext();
 
@@ -13,36 +15,45 @@ export const useCart = () => {
 export const CartProvider = ({ children }) => {
   const [cart, setCart] = useState([]);
 
+  // Load from IndexedDB on start
+  useEffect(() => {
+    (async () => {
+      const items = await idbGetAll('cart');
+      setCart(items);
+    })();
+  }, []);
+
+  // Save each item to IndexedDB whenever cart changes
+  useEffect(() => {
+    (async () => {
+      await idbClear('cart');
+      await Promise.all(cart.map(item => idbPut('cart', item)));
+    })();
+  }, [cart]);
+
+  useEffect(() => {
+    const onOnline = async () => {
+      // reconcile against catalog and replay queued actions
+      setCart(prev => reconcileCartAgainstCatalog(prev));
+      await replayQueueOnline();
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
+
   const addToCart = (product, quantity = 1) => {
     setCart(prevCart => {
-      const normalizedId = product._id || product.id;
-      const effectivePrice = typeof product.discountPrice === 'number' && product.discountPrice > 0
-        ? product.discountPrice
-        : product.price;
-      const discountPercent = (typeof product.discountPrice === 'number' && product.discountPrice > 0 && product.price > 0)
-        ? Math.round(((product.price - product.discountPrice) / product.price) * 100)
-        : (typeof product.discount === 'number' ? product.discount : 0);
-
-      const normalized = {
-        ...product,
-        _id: normalizedId,
-        id: normalizedId,
-        price: effectivePrice,
-        discount: discountPercent,
-        stock: product.stock ?? 9999,
-        image: product.images?.[0]?.url || product.image,
-      };
-
-      const existingItem = prevCart.find(item => (item._id || item.id) === normalizedId);
+      const existingItem = prevCart.find(item => item.id === product.id);
       if (existingItem) {
         return prevCart.map(item =>
-          (item._id || item.id) === normalizedId
-            ? { ...item, quantity: Math.min(item.quantity + quantity, normalized.stock) }
+          item.id === product.id
+            ? { ...item, quantity: Math.min(item.quantity + quantity, product.stock) }
             : item
         );
       }
-      return [...prevCart, { ...normalized, quantity }];
+      return [...prevCart, { ...product, quantity }];
     });
+    if (!navigator.onLine) enqueueAction({ type: 'add', payload: { productId: product.id, quantity } });
   };
 
   const updateCartQuantity = (productId, quantity) => {
@@ -55,10 +66,12 @@ export const CartProvider = ({ children }) => {
         )
       );
     }
+    if (!navigator.onLine) enqueueAction({ type: 'update', payload: { productId, quantity } });
   };
 
   const clearCart = () => {
     setCart([]);
+    if (!navigator.onLine) enqueueAction({ type: 'clear' });
   };
 
   const getTotalItems = () => cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -89,4 +102,3 @@ export const CartProvider = ({ children }) => {
     </CartContext.Provider>
   );
 };
-

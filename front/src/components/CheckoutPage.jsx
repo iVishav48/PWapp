@@ -6,20 +6,21 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { orderService } from '../services/api';
 import { Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { idbPut } from '../utils/idb';
 
 const CheckoutPage = () => {
   const navigate = useNavigate();
   const { cart, getSubtotal, getTotalDiscount, getTotal, clearCart } = useCart();
   const { isOnline } = useApp();
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [formData, setFormData] = useState({
-    name: user?.name || '',
-    email: user?.email || '',
-    phone: user?.phone || '',
-    address: user?.address || '',
-    city: user?.city || '',
-    state: user?.state || '',
-    zipCode: user?.zipCode || ''
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: '',
+    zipCode: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, synced, error
@@ -53,7 +54,7 @@ const CheckoutPage = () => {
     }
     
     if (!isOnline) {
-      alert('You are currently offline. Your order will be synced when you come back online.');
+      alert('You are currently offline. Your order will be created locally and can be paid when you are back online.');
     }
     
     setIsSubmitting(true);
@@ -78,17 +79,110 @@ const CheckoutPage = () => {
         notes: ''
       };
 
+      // If offline or cart contains non-Mongo ObjectIds (likely mock data), create a local bill instead of calling API
+      const hasInvalidIds = cart.some(item => !String(item.id).match(/^[a-fA-F0-9]{24}$/));
+      if (!isOnline || hasInvalidIds) {
+        const createdAt = new Date().toISOString();
+        const itemsDetailed = cart.map(item => ({
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+          image: item.image,
+        }));
+        const subtotal = getSubtotal();
+        const tax = subtotal * 0.08;
+        const shippingCost = subtotal > 50 ? 0 : 9.99;
+        const discount = getTotalDiscount();
+        const total = subtotal + tax + shippingCost - discount;
+
+        const bill = {
+          items: itemsDetailed,
+          shippingAddress: orderData.shippingAddress,
+          paymentMethod: orderData.paymentMethod,
+          subtotal,
+          tax,
+          shippingCost,
+          discount,
+          total,
+          paymentStatus: 'pending',
+          orderStatus: 'pending',
+          createdAt,
+          expectedDeliveryDate: new Date(new Date().setDate(new Date().getDate() + 5)).toISOString(),
+        };
+
+        await idbPut('bills', bill);
+        clearCart();
+        setSyncStatus('synced');
+        navigate('/bill', { state: { bill } });
+        return;
+      }
+
       // Create order via API
       const response = await orderService.createOrder(orderData);
-      
+
+      // Normalize server order
+      const order = response?.data?.order || response?.data || {};
+      const bill = {
+        orderId: order._id || order.id,
+        orderNumber: order.orderNumber || (order._id ? String(order._id).slice(-6).toUpperCase() : undefined),
+        items: Array.isArray(order.items) && order.items.length > 0
+          ? order.items.map(it => ({ name: it.name, price: it.price, quantity: it.quantity, image: it.image }))
+          : cart.map(item => ({ name: item.name, quantity: item.quantity, price: item.price - (item.price * (item.discount || 0) / 100), image: item.image })),
+        shippingAddress: order.shippingAddress || {
+          fullName: formData.name,
+          address: formData.address,
+          city: formData.city,
+          state: formData.state,
+          zipCode: formData.zipCode,
+          phone: formData.phone,
+        },
+        customer: {
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+        },
+        subtotal: typeof order.subtotal === 'number' ? order.subtotal : getSubtotal(),
+        tax: typeof order.tax === 'number' ? order.tax : getSubtotal() * 0.08,
+        shippingCost: typeof order.shippingCost === 'number' ? order.shippingCost : (getSubtotal() > 50 ? 0 : 9.99),
+        discount: typeof order.discount === 'number' ? order.discount : getTotalDiscount(),
+        total: typeof order.total === 'number' ? order.total : getTotal(),
+        paymentStatus: order.paymentStatus || 'pending',
+        orderStatus: order.orderStatus || 'pending',
+        createdAt: order.createdAt || new Date().toISOString(),
+        expectedDeliveryDate: order.expectedDeliveryDate || new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
       setSyncStatus('synced');
       clearCart();
-      alert('Order placed successfully!');
-      navigate('/');
+      
+      // Store bill in IndexedDB
+      await idbPut('bills', bill);
+      
+      // Navigate to bill page with bill data
+      navigate('/bill', { state: { bill } });
     } catch (error) {
-      console.error('Error placing order:', error);
-      setSyncStatus('error');
-      alert('Failed to place order. Please try again.');
+      console.error('Order creation error:', error);
+      // As a fallback, create a local bill and navigate
+      const createdAt = new Date().toISOString();
+      const subtotal = getSubtotal();
+      const tax = subtotal * 0.08;
+      const shippingCost = subtotal > 50 ? 0 : 9.99;
+      const discount = getTotalDiscount();
+      const total = subtotal + tax + shippingCost - discount;
+      const offlineBill = {
+        orderId: `offline_${Date.now()}`,
+        orderNumber: `OFF-${Date.now()}`,
+        items: cart.map(item => ({ name: item.name, quantity: item.quantity, price: item.price - (item.price * (item.discount || 0) / 100), image: item.image })),
+        shippingAddress: { fullName: formData.name, address: formData.address, city: formData.city, state: formData.state, zipCode: formData.zipCode, phone: formData.phone },
+        customer: { name: formData.name, email: formData.email, phone: formData.phone },
+        subtotal, tax, shippingCost, discount, total,
+        paymentStatus: 'pending', orderStatus: 'pending', createdAt,
+        expectedDeliveryDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+      await idbPut('bills', offlineBill);
+      clearCart();
+      setSyncStatus('offline');
+      navigate('/bill', { state: { bill: offlineBill } });
     } finally {
       setIsSubmitting(false);
     }
@@ -149,26 +243,14 @@ const CheckoutPage = () => {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-light text-gray-700 mb-2">City</label>
+                    <label className="block text-sm font-light text-gray-700 mb-2">ZIP Code</label>
                     <input
                       type="text"
                       required
-                      value={formData.city}
-                      onChange={(e) => setFormData({...formData, city: e.target.value})}
+                      value={formData.zipCode}
+                      onChange={(e) => setFormData({...formData, zipCode: e.target.value})}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent font-light"
-                      placeholder="New York"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-light text-gray-700 mb-2">State</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.state}
-                      onChange={(e) => setFormData({...formData, state: e.target.value})}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent font-light"
-                      placeholder="NY"
+                      placeholder="10001"
                     />
                   </div>
                   
@@ -289,7 +371,7 @@ const CheckoutPage = () => {
 
               <button
                 onClick={handleSubmit}
-                disabled={isSubmitting || !isOnline}
+                disabled={isSubmitting}
                 className="w-full px-6 py-4 bg-gray-900 text-white font-light rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? 'Processing...' : 'Place Order'}
@@ -303,4 +385,3 @@ const CheckoutPage = () => {
 };
 
 export default CheckoutPage;
-

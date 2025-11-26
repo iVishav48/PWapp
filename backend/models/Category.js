@@ -42,8 +42,7 @@ const categorySchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-categorySchema.index({ slug: 1 });
-categorySchema.index({ name: 1 });
+// Note: slug and name already have indexes from unique: true
 categorySchema.index({ isActive: 1 });
 
 // Virtual for subcategories

@@ -1,5 +1,5 @@
-// Sample product data
-export const PRODUCTS = [
+// Server folder products data - converted to CommonJS
+const PRODUCTS = [
   {
     id: 1,
     name: "Premium Wireless Headphones",
@@ -153,7 +153,34 @@ export const PRODUCTS = [
     description: "Lightweight daily serum for a plump, dewy complexion. Fragrance-free and dermatologist tested.",
     discount: 0,
     stock: 120
-  }
+  },
 ];
 
-export const CATEGORIES = ["All", "Electronics", "Accessories", "Fashion", "Home", "Kitchen", "Beauty"];
+// Transformation logic - converts server format to backend format
+const transformProducts = (products) => {
+  return products.map(product => {
+    let salePrice = product.price;
+    let originalPrice = null;
+
+    if (product.discount > 0) {
+      salePrice = product.price * (1 - product.discount / 100);
+      originalPrice = product.price;
+    }
+
+    return {
+      name: product.name,
+      shortDesc: product.shortDesc,
+      description: product.description,
+      imageURL: product.image,
+      category: product.category,
+      stock: product.stock,
+      price: parseFloat(salePrice.toFixed(2)),
+      originalPrice: originalPrice ? parseFloat(originalPrice.toFixed(2)) : null,
+    };
+  });
+};
+
+module.exports = {
+  PRODUCTS,
+  products: transformProducts(PRODUCTS),
+};
