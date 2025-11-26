@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Navbar from './Navbar';
 import { Loader2 } from 'lucide-react';
+import { authService } from '../services/api';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -17,12 +18,16 @@ const LoginPage = () => {
     setError('');
     setLoading(true);
 
-    const result = await login(email, password);
-
-    if (result.success) {
-      navigate('/');
-    } else {
-      setError(result.error || 'Login failed. Please try again.');
+    try {
+      const data = await authService.login(email, password);
+      if (data.token) {
+        localStorage.setItem('token', data.token);
+        navigate('/');
+      } else {
+        setError('Login failed: No token received');
+      }
+    } catch (err) {
+      setError(err.message || 'Login failed. Please try again.');
     }
 
     setLoading(false);

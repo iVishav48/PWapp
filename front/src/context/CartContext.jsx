@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { idbGetAll, idbPut, idbDelete, idbClear } from '../utils/idb';
-import { enqueueAction, reconcileCartAgainstCatalog, replayQueueOnline } from '../utils/offlineQueue';
+import { cartService } from '../services/api';
 
 const CartContext = createContext();
 
@@ -14,6 +14,7 @@ export const useCart = () => {
 
 export const CartProvider = ({ children }) => {
   const [cart, setCart] = useState([]);
+  const [loading, setLoading] = useState(false);
 
   // Load from IndexedDB on start
   useEffect(() => {
@@ -31,69 +32,91 @@ export const CartProvider = ({ children }) => {
     })();
   }, [cart]);
 
+  // Sync with backend when online
   useEffect(() => {
-    const onOnline = async () => {
-      // reconcile against catalog and replay queued actions
-      setCart(prev => reconcileCartAgainstCatalog(prev));
-      await replayQueueOnline();
+    const syncCart = async () => {
+      try {
+        setLoading(true);
+        const serverCart = await cartService.getCart();
+        if (serverCart?.items && Array.isArray(serverCart.items)) {
+          setCart(serverCart.items);
+        }
+      } catch {
+        // Keep local IndexedDB cart
+      } finally {
+        setLoading(false);
+      }
     };
-    window.addEventListener('online', onOnline);
-    return () => window.removeEventListener('online', onOnline);
+    syncCart();
   }, []);
 
-  const addToCart = (product, quantity = 1) => {
-    setCart(prevCart => {
-      const existingItem = prevCart.find(item => item.id === product.id);
-      if (existingItem) {
-        return prevCart.map(item =>
-          item.id === product.id
-            ? { ...item, quantity: Math.min(item.quantity + quantity, product.stock) }
-            : item
-        );
-      }
-      return [...prevCart, { ...product, quantity }];
-    });
-    if (!navigator.onLine) enqueueAction({ type: 'add', payload: { productId: product.id, quantity } });
-  };
-
-  const updateCartQuantity = (productId, quantity) => {
-    if (quantity === 0) {
-      setCart(prevCart => prevCart.filter(item => item.id !== productId));
-    } else {
-      setCart(prevCart =>
-        prevCart.map(item =>
-          item.id === productId ? { ...item, quantity } : item
-        )
-      );
+  const addToCart = async (product) => {
+    const existing = cart.find(item => item.id === product.id);
+    const updated = existing
+      ? cart.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item)
+      : [...cart, { ...product, quantity: 1 }];
+    setCart(updated);
+    try {
+      await cartService.addToCart(product.id, 1);
+    } catch {
+      // Offline; keep local state
     }
-    if (!navigator.onLine) enqueueAction({ type: 'update', payload: { productId, quantity } });
   };
 
-  const clearCart = () => {
+  const updateQuantity = async (productId, quantity) => {
+    if (quantity === 0) {
+      const updated = cart.filter(item => item.id !== productId);
+      setCart(updated);
+      try {
+        await cartService.removeFromCart(productId);
+      } catch {}
+    } else {
+      const updated = cart.map(item => item.id === productId ? { ...item, quantity } : item);
+      setCart(updated);
+      try {
+        await cartService.updateCart(productId, quantity);
+      } catch {}
+    }
+  };
+
+  const clearCart = async () => {
     setCart([]);
-    if (!navigator.onLine) enqueueAction({ type: 'clear' });
+    try {
+      await cartService.clearCart();
+    } catch {}
   };
 
-  const getTotalItems = () => cart.reduce((sum, item) => sum + item.quantity, 0);
-  
-  const getSubtotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  
-  const getTotalDiscount = () => cart.reduce((sum, item) => {
-    const discount = (item.price * item.discount / 100) * item.quantity;
-    return sum + discount;
-  }, 0);
+  const getSubtotal = () => {
+    return cart.reduce((sum, item) => {
+      const price = item.discountPrice || item.price || 0;
+      return sum + price * item.quantity;
+    }, 0);
+  };
 
-  const getTotal = () => getSubtotal() - getTotalDiscount();
+  const getTotalDiscount = () => {
+    return cart.reduce((sum, item) => {
+      if (!item.discountPrice) return sum;
+      return sum + (item.price - item.discountPrice) * item.quantity;
+    }, 0);
+  };
+
+  const getTotal = () => {
+    const subtotal = getSubtotal();
+    const tax = subtotal * 0.08;
+    const shippingCost = subtotal > 50 ? 0 : 9.99;
+    const discount = getTotalDiscount();
+    return subtotal + tax + shippingCost - discount;
+  };
 
   const value = {
     cart,
+    loading,
     addToCart,
-    updateCartQuantity,
+    updateQuantity,
     clearCart,
-    getTotalItems,
     getSubtotal,
     getTotalDiscount,
-    getTotal
+    getTotal,
   };
 
   return (

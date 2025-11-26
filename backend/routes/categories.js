@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const Category = require('../models/Category');
 const Product = require('../models/Product');
 const { requireAdmin } = require('../middleware/auth');
+const mongoose = require('mongoose');
 const router = express.Router();
 
 // GET /api/categories - Get all categories
@@ -10,6 +11,12 @@ router.get('/', async (req, res) => {
   try {
     const { parent = null, includeInactive = false } = req.query;
     
+    if (mongoose.connection.readyState !== 1) {
+      const { categories } = require('../data/categories');
+      const toSlug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      return res.json({ categories: categories.map(c => ({ name: c.name, slug: toSlug(c.name) })) });
+    }
+
     const query = {};
     if (!includeInactive || includeInactive === 'false') {
       query.isActive = true;

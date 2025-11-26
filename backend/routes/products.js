@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const Product = require('../models/Product');
 const Category = require('../models/Category');
 const { requireAdmin } = require('../middleware/auth');
+const mongoose = require('mongoose');
 const router = express.Router();
 
 // GET /api/products - Get all products with pagination, search, and filtering
@@ -20,6 +21,12 @@ router.get('/', async (req, res) => {
       featured,
       inStock,
     } = req.query;
+
+    if (mongoose.connection.readyState !== 1) {
+      const { PRODUCTS } = require('../data/product');
+      const filtered = Array.isArray(PRODUCTS) ? PRODUCTS : [];
+      return res.json({ products: filtered });
+    }
 
     const query = { isActive: true };
     
@@ -120,13 +127,21 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Try to find by ID first, then by slug
-    let product = await Product.findOne({
-      $or: [
-        { _id: id },
-        { slug: id }
-      ],
+    if (mongoose.connection.readyState !== 1) {
+      const { PRODUCTS } = require('../data/product');
+      const local = (Array.isArray(PRODUCTS) ? PRODUCTS : []).find(p => String(p.id) === String(id));
+      if (!local) {
+        return res.status(404).json({ message: 'Product not found' });
+      }
+      return res.json(local);
+    }
+    const orConditions = [{ slug: id }];
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      orConditions.unshift({ _id: id });
+    }
+
+    const product = await Product.findOne({
+      $or: orConditions,
       isActive: true
     }).populate('category', 'name slug');
 

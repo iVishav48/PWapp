@@ -1,17 +1,78 @@
-import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from './Navbar';
-import { PRODUCTS } from '../data/products';
+import { productService } from '../services/api';
 import { useCart } from '../context/CartContext';
 
 const ProductPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { addToCart } = useCart();
   const [quantity, setQuantity] = useState(1);
-  
-  const product = PRODUCTS.find(p => p.id === parseInt(id));
-  
+  const [product, setProduct] = useState(location.state?.product || null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (product) {
+      return () => { isCancelled = true; };
+    }
+    const fetchProduct = async () => {
+      try {
+        const res = await productService.getProduct(id);
+        const data = res?.data?.product || res?.data;
+        if (!data) {
+          if (!isCancelled) setProduct(null);
+          return;
+        }
+        const image = Array.isArray(data?.images) && data.images.length > 0
+          ? (typeof data.images[0] === 'string' ? data.images[0] : data.images[0]?.url)
+          : data?.image;
+        const discount = typeof data?.discountPrice === 'number' && data?.price > 0
+          ? Math.round(((data.price - data.discountPrice) / data.price) * 100)
+          : (typeof data?.discount === 'number' ? data.discount : 0);
+        const normalized = {
+          id: data._id || data.id,
+          name: data.name,
+          price: data.price,
+          discountPrice: typeof data.discountPrice === 'number' ? data.discountPrice : undefined,
+          discount,
+          image,
+          category: (data?.category && (data.category.name || data.category)) || 'Product',
+          shortDesc: data.shortDesc || data.shortDescription || '',
+          description: data.description || '',
+          stock: typeof data.stock === 'number' ? data.stock : 1,
+        };
+        if (!isCancelled) setProduct(normalized);
+      } catch (e) {
+        try {
+          const { PRODUCTS } = await import('../data/products');
+          const local = PRODUCTS.find(p => String(p.id) === String(id));
+          if (local && !isCancelled) {
+            const normalized = {
+              id: local.id,
+              name: local.name,
+              price: local.price,
+              discount: local.discount,
+              image: local.image,
+              category: local.category,
+              shortDesc: local.shortDesc,
+              description: local.description,
+              stock: local.stock,
+            };
+            setProduct(normalized);
+          } else if (!isCancelled) {
+            setProduct(null);
+          }
+        } catch (_) {
+          if (!isCancelled) setProduct(null);
+        }
+      }
+    };
+    fetchProduct();
+    return () => { isCancelled = true; };
+  }, [id, product]);
+
   if (!product) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -29,7 +90,9 @@ const ProductPage = () => {
     );
   }
 
-  const discountedPrice = product.price - (product.price * product.discount / 100);
+  const discountedPrice = typeof product.discountPrice === 'number'
+    ? product.discountPrice
+    : product.price - (product.price * (product.discount || 0) / 100);
 
   return (
     <div className="min-h-screen bg-gray-50">

@@ -4,12 +4,16 @@ const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const { auth } = require('../middleware/auth');
+const mongoose = require('mongoose');
 const router = express.Router();
 
 // GET /api/orders - Get user's orders
 router.get('/', auth, async (req, res) => {
   try {
     const userId = req.user.id;
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({ orders: [], pagination: { currentPage: 1, totalPages: 0, totalItems: 0, itemsPerPage: 10, hasNext: false, hasPrev: false } });
+    }
     const {
       page = 1,
       limit = 10,
@@ -92,7 +96,9 @@ router.post('/',
   auth,
   [
     body('items').isArray({ min: 1 }).withMessage('Order must contain at least one item'),
-    body('items.*.productId').isMongoId().withMessage('Valid product ID is required'),
+    body('items.*.productId').custom((value) => {
+      return mongoose.Types.ObjectId.isValid(value) || /^\d+$/.test(value);
+    }).withMessage('Valid product ID (ObjectId or number) is required'),
     body('items.*.quantity').isInt({ min: 1 }).withMessage('Quantity must be at least 1'),
     body('shippingAddress').isObject().withMessage('Shipping address is required'),
     body('shippingAddress.fullName').trim().isLength({ min: 1 }).withMessage('Full name is required'),
@@ -112,13 +118,56 @@ router.post('/',
       const { items, shippingAddress, paymentMethod, discount = 0, notes } = req.body;
       const userId = req.user.id;
 
+      if (mongoose.connection.readyState !== 1) {
+        const bill = {
+          orderId: `offline_${Date.now()}`,
+          orderNumber: `OFF-${Date.now()}`,
+          items: items.map(item => ({
+            name: item.name || `Product ${item.productId}`,
+            price: item.price || 0,
+            quantity: item.quantity,
+            image: item.image || null,
+          })),
+          shippingAddress,
+          customer: { name: shippingAddress.fullName },
+          subtotal: items.reduce((sum, it) => sum + (it.price || 0) * it.quantity, 0),
+          tax: 0,
+          shippingCost: 0,
+          discount,
+          total: 0,
+          paymentStatus: 'pending',
+          orderStatus: 'pending',
+          createdAt: new Date().toISOString(),
+          expectedDeliveryDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        };
+        bill.total = bill.subtotal + bill.tax + bill.shippingCost - bill.discount;
+        return res.status(201).json({ order: bill });
+      }
+
       // Validate products and calculate totals
       const orderItems = [];
       let subtotal = 0;
       const stockUpdates = []; // Track stock updates for atomic operations
       
       for (const item of items) {
-        const product = await Product.findById(item.productId);
+        let product;
+        if (mongoose.Types.ObjectId.isValid(item.productId)) {
+          product = await Product.findById(item.productId);
+        } else {
+          // Fallback to local data for numeric IDs
+          const { PRODUCTS } = require('../data/product');
+          const local = Array.isArray(PRODUCTS) ? PRODUCTS.find(p => String(p.id) === String(item.productId)) : null;
+          if (local) {
+            product = {
+              _id: local.id,
+              name: local.name,
+              finalPrice: local.price,
+              images: local.image ? [{ url: local.image }] : [],
+              isActive: true,
+              stock: 999,
+            };
+          }
+        }
         if (!product) {
           return res.status(400).json({ message: `Product ${item.productId} not found` });
         }

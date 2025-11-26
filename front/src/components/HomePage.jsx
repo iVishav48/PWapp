@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import Navbar from './Navbar';
@@ -6,6 +6,7 @@ import ConnectivityBanner from './ConnectivityBanner';
 import { PRODUCTS, CATEGORIES } from '../data/products';
 import { useApp } from '../context/AppContext';
 import { useCart } from '../context/CartContext';
+import { productService } from '../services/api';
 
 const HomePage = () => {
   const navigate = useNavigate();
@@ -14,14 +15,35 @@ const HomePage = () => {
   const [page, setPage] = useState(1);
   const pageSize = 6;
   const { addToCart } = useCart();
+  const [products, setProducts] = useState(PRODUCTS);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchProducts = async () => {
+      setLoading(true);
+      try {
+        const data = await productService.getProducts();
+        if (!cancelled && data?.products && Array.isArray(data.products)) {
+          setProducts(data.products);
+        }
+      } catch {
+        // Keep fallback PRODUCTS
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    fetchProducts();
+    return () => { cancelled = true; };
+  }, []);
 
   const filteredProducts = useMemo(() => {
-    return PRODUCTS.filter(product => {
+    return products.filter(product => {
       const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesCategory = selectedCategory === 'All' || product.category === selectedCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [searchQuery, selectedCategory]);
+  }, [products, searchQuery, selectedCategory]);
 
   const sortedProducts = useMemo(() => {
     const arr = [...filteredProducts];
@@ -93,72 +115,81 @@ const HomePage = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-12">
-        <h2 className="text-3xl font-display font-light text-gray-900 mb-8 tracking-wide">Featured Products</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-          {pageItems.map(product => (
-            <div
-              key={product.id}
-              onClick={() => navigate(`/product/${product.id}`)}
-              className="bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 cursor-pointer group border border-gray-200"
-            >
-              <div className="aspect-square overflow-hidden bg-gray-100">
-                <img
-                  src={product.image}
-                  alt={product.name}
-                  loading="lazy"
-                  decoding="async"
-                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                />
-              </div>
-              <div className="p-6">
-                <p className="text-xs font-light text-gray-500 uppercase tracking-wider mb-2">{product.category}</p>
-                <h3 className="text-lg font-light text-gray-900 mb-2">{product.name}</h3>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-2xl font-light text-gray-900">${product.price.toFixed(2)}</p>
-                    {product.discount > 0 && (
-                      <p className="text-sm font-light text-green-600">{product.discount}% off</p>
-                    )}
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      addToCart(product);
-                    }}
-                    className="px-4 py-2 bg-gray-900 text-white text-sm font-light rounded-lg hover:bg-gray-800 transition-colors"
-                  >
-                    Add to Cart
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        {sortedProducts.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-lg font-light text-gray-500">No products found matching your criteria.</p>
+        {loading && (
+          <div className="text-center py-8">
+            <p className="text-gray-500">Loading products...</p>
           </div>
         )}
+        {!loading && (
+          <>
+            <h2 className="text-3xl font-display font-light text-gray-900 mb-8 tracking-wide">Featured Products</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+              {pageItems.map(product => (
+                <div
+                  key={product.id}
+                  onClick={() => navigate(`/product/${product.id}`)}
+                  className="bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 cursor-pointer group border border-gray-200"
+                >
+                  <div className="aspect-square overflow-hidden bg-gray-100">
+                    <img
+                      src={product.image}
+                      alt={product.name}
+                      loading="lazy"
+                      decoding="async"
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                  </div>
+                  <div className="p-6">
+                    <p className="text-xs font-light text-gray-500 uppercase tracking-wider mb-2">{product.category}</p>
+                    <h3 className="text-lg font-light text-gray-900 mb-2">{product.name}</h3>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-2xl font-light text-gray-900">${(product.price || 0).toFixed(2)}</p>
+                        {product.discount > 0 && (
+                          <p className="text-sm font-light text-green-600">{product.discount}% off</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addToCart(product);
+                        }}
+                        className="px-4 py-2 bg-gray-900 text-white text-sm font-light rounded-lg hover:bg-gray-800 transition-colors"
+                      >
+                        Add to Cart
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {sortedProducts.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-lg font-light text-gray-500">No products found matching your criteria.</p>
+              </div>
+            )}
 
-        {sortedProducts.length > 0 && (
-          <div className="mt-10 flex items-center justify-center gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-2 text-sm rounded-lg border border-gray-300 disabled:opacity-50 hover:bg-gray-50"
-            >
-              Previous
-            </button>
-            <span className="text-sm text-gray-600">Page {currentPage} of {totalPages}</span>
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="px-3 py-2 text-sm rounded-lg border border-gray-300 disabled:opacity-50 hover:bg-gray-50"
-            >
-              Next
-            </button>
-          </div>
+            {sortedProducts.length > 0 && (
+              <div className="mt-10 flex items-center justify-center gap-2">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-2 text-sm rounded-lg border border-gray-300 disabled:opacity-50 hover:bg-gray-50"
+                >
+                  Previous
+                </button>
+                <span className="text-sm text-gray-600">Page {currentPage} of {totalPages}</span>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-2 text-sm rounded-lg border border-gray-300 disabled:opacity-50 hover:bg-gray-50"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

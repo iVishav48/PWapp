@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Navbar from './Navbar';
 import { Loader2 } from 'lucide-react';
+import { authService } from '../services/api';
 
 const RegisterPage = () => {
   const [name, setName] = useState('');
@@ -31,12 +32,16 @@ const RegisterPage = () => {
 
     setLoading(true);
 
-    const result = await register(name, email, password);
-
-    if (result.success) {
-      navigate('/');
-    } else {
-      setError(result.error || 'Registration failed. Please try again.');
+    try {
+      const data = await authService.register({ name, email, password });
+      if (data.token) {
+        localStorage.setItem('token', data.token);
+        navigate('/');
+      } else {
+        setError('Registration failed: No token received');
+      }
+    } catch (err) {
+      setError(err.message || 'Registration failed. Please try again.');
     }
 
     setLoading(false);

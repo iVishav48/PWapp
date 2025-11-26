@@ -12,10 +12,10 @@ const CheckoutPage = () => {
   const navigate = useNavigate();
   const { cart, getSubtotal, getTotalDiscount, getTotal, clearCart } = useCart();
   const { isOnline } = useApp();
-  const { isAuthenticated } = useAuth();
+  const { user } = useAuth();
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
+    fullName: user?.name || '',
+    email: user?.email || '',
     phone: '',
     address: '',
     city: '',
@@ -68,7 +68,7 @@ const CheckoutPage = () => {
           quantity: item.quantity
         })),
         shippingAddress: {
-          fullName: formData.name,
+          fullName: formData.fullName,
           address: formData.address,
           city: formData.city,
           state: formData.state,
@@ -129,7 +129,7 @@ const CheckoutPage = () => {
           ? order.items.map(it => ({ name: it.name, price: it.price, quantity: it.quantity, image: it.image }))
           : cart.map(item => ({ name: item.name, quantity: item.quantity, price: item.price - (item.price * (item.discount || 0) / 100), image: item.image })),
         shippingAddress: order.shippingAddress || {
-          fullName: formData.name,
+          fullName: formData.fullName,
           address: formData.address,
           city: formData.city,
           state: formData.state,
@@ -137,7 +137,7 @@ const CheckoutPage = () => {
           phone: formData.phone,
         },
         customer: {
-          name: formData.name,
+          name: formData.fullName,
           email: formData.email,
           phone: formData.phone,
         },
@@ -211,8 +211,8 @@ const CheckoutPage = () => {
                     <input
                       type="text"
                       required
-                      value={formData.name}
-                      onChange={(e) => setFormData({...formData, name: e.target.value})}
+                      value={formData.fullName}
+                      onChange={(e) => setFormData({...formData, fullName: e.target.value})}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent font-light"
                       placeholder="John Doe"
                     />

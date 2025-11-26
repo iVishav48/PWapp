@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const router = express.Router();
 const User = require('../models/User');
+const mongoose = require('mongoose');
 
 // POST /api/auth/register - Register new user
 router.post('/register',
@@ -19,6 +20,19 @@ router.post('/register',
       }
 
       const { email, password, name, username } = req.body;
+
+      if (mongoose.connection.readyState !== 1) {
+        const token = jwt.sign(
+          { userId: `offline_user_${Date.now()}`, isGuest: true },
+          process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+          { expiresIn: '30d' }
+        );
+        return res.status(201).json({
+          message: 'User registered offline (no DB)',
+          token,
+          user: { id: `offline_user_${Date.now()}`, email, name, isGuest: true },
+        });
+      }
 
       // Check if user already exists
       const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -92,6 +106,19 @@ router.post('/login',
 
       const { email, password } = req.body;
 
+      if (mongoose.connection.readyState !== 1) {
+        const token = jwt.sign(
+          { userId: `offline_user_${Date.now()}`, isGuest: true },
+          process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+          { expiresIn: '30d' }
+        );
+        return res.json({
+          message: 'Login successful (offline mode)',
+          token,
+          user: { id: `offline_user_${Date.now()}`, email, isGuest: true },
+        });
+      }
+
       // Find user in database and include password for comparison
       const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
       if (!user) {
@@ -150,6 +177,10 @@ router.get('/me', async (req, res) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
     
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({ user: { id: decoded.userId, isGuest: decoded.isGuest || true, email: '', name: 'Offline User' } });
+    }
+
     // Find user in database
     const user = await User.findById(decoded.userId);
     if (!user) {

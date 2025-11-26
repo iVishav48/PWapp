@@ -64,12 +64,17 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('combined'));
 }
 
-// Database connection
-mongoose.connect(process.env.MONGODB_URI, {
-  dbName: process.env.MONGODB_DB || 'pwa-storefront',
-})
-.then(() => console.log('MongoDB connected successfully'))
-.catch(err => console.error('MongoDB connection error:', err));
+// Database connection (optional in dev)
+const mongoUri = process.env.MONGODB_URI;
+if (mongoUri && typeof mongoUri === 'string' && mongoUri.trim().length > 0) {
+  mongoose.connect(mongoUri, {
+    dbName: process.env.MONGODB_DB || 'pwa-storefront',
+  })
+  .then(() => console.log('MongoDB connected successfully'))
+  .catch(err => console.error('MongoDB connection error:', err));
+} else {
+  console.warn('MONGODB_URI not set. Running without a database connection.');
+}
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
