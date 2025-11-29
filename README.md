@@ -23,15 +23,6 @@ The app follows modern PWA principles with service worker caching, IndexedDB per
 
 ---
 
-## 🧩 Prerequisites
-Before running, ensure you have:
-- [Node.js (v18+)](https://nodejs.org/)
-- [npm](https://www.npmjs.com/)
-- [MongoDB](https://www.mongodb.com/) or [Docker Desktop](https://www.docker.com/)
-- [Git](https://git-scm.com/)
-
----
-
 ## 🚀 Setup & Installation
 
 ### 1️⃣ Clone the Repository
